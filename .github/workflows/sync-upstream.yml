@@ -1,7 +1,13 @@
 name: Sync upstream
 
 # Fork maintenance:
-#   1. Merge upstream (anthropics/<this repo name>) main into this fork's main.
+#   1. Bring this fork's main up to date with upstream (anthropics/<this repo
+#      name>) main. Everything is taken from upstream except .github/workflows,
+#      which is kept exactly as it is in this fork: the default Actions token
+#      is not allowed to create or update workflow files, so upstream's
+#      workflow changes are intentionally left out. Each sync is one merge
+#      commit whose second parent is the upstream commit, so history and the
+#      "commits behind" counter stay correct.
 #   2. Disable every other workflow inherited from upstream so it does not run
 #      in this fork. Add a workflow path to KEEP_WORKFLOWS to exempt it.
 #
@@ -27,6 +33,7 @@ concurrency:
 env:
   UPSTREAM_OWNER: anthropics
   SYNC_BRANCH: main
+  WORKFLOWS_DIR: .github/workflows
   SELF_WORKFLOW: .github/workflows/sync-upstream.yml
   # Space-separated workflow paths that must stay enabled besides this one.
   KEEP_WORKFLOWS: ""
@@ -41,6 +48,11 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream into fork
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -euo pipefail
           upstream="https://github.com/${UPSTREAM_OWNER}/${GITHUB_REPOSITORY#*/}.git"
@@ -49,13 +61,17 @@ jobs:
             echo "Already up to date with ${upstream} (${SYNC_BRANCH})."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git merge --no-ff \
-            -m "sync: merge upstream ${SYNC_BRANCH} ($(git rev-parse --short FETCH_HEAD))" \
-            FETCH_HEAD
-          git push origin "HEAD:${SYNC_BRANCH}"
-          echo "Merged $(git rev-list --count 'HEAD^1..FETCH_HEAD') upstream commit(s)."
+          # Build the new tree in the index: upstream's tree, with this fork's
+          # ${WORKFLOWS_DIR} put back on top.
+          git read-tree FETCH_HEAD
+          git rm -r -f -q --cached "${WORKFLOWS_DIR}" 2>/dev/null || true
+          git read-tree --prefix="${WORKFLOWS_DIR}/" "HEAD:${WORKFLOWS_DIR}"
+          tree=$(git write-tree)
+          short=$(git rev-parse --short FETCH_HEAD)
+          commit=$(git commit-tree "${tree}" -p HEAD -p FETCH_HEAD \
+            -m "sync: merge upstream ${SYNC_BRANCH} (${short}); ${WORKFLOWS_DIR} kept as-is")
+          git push origin "${commit}:refs/heads/${SYNC_BRANCH}"
+          echo "Merged $(git rev-list --count HEAD..FETCH_HEAD) upstream commit(s) up to ${short} as ${commit}."
 
       - name: Disable workflows inherited from upstream
         env:
