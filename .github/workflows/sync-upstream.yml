@@ -5,12 +5,16 @@ name: Sync upstream
 #   2. Disable every other workflow inherited from upstream so it does not run
 #      in this fork. Add a workflow path to KEEP_WORKFLOWS to exempt it.
 #
-# Runs daily and on demand (Actions tab -> "Sync upstream" -> "Run workflow").
+# Runs daily, on demand (Actions tab -> "Sync upstream" -> "Run workflow"),
+# and once whenever this file changes on main.
 
 on:
   schedule:
     - cron: "0 3 * * *" # 03:00 UTC = 12:00 KST
   workflow_dispatch:
+  push: # also run once whenever this workflow file itself changes on main
+    branches: [main]
+    paths: [.github/workflows/sync-upstream.yml]
 
 permissions:
   contents: write
